@@ -1,9 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { orderSchema, OrderFormData, CEMENT_TYPES, QUANTITY_UNITS } from "@/lib/schema";
+
+const VAT_RATE = 0.18;
+
+function formatTZS(amount: number) {
+  return "TZS " + Math.round(amount).toLocaleString("en-TZ");
+}
 
 function FieldError({ message }: { message?: string }) {
   if (!message) return null;
@@ -47,28 +53,113 @@ function SectionHeading({ children }: { children: React.ReactNode }) {
   );
 }
 
+// File upload field component
+function FileField({
+  id,
+  label,
+  accept,
+  required,
+  hint,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  accept?: string;
+  required?: boolean;
+  hint?: string;
+  onChange: (file: File | null) => void;
+}) {
+  const [fileName, setFileName] = useState<string | null>(null);
+
+  function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0] ?? null;
+    setFileName(file?.name ?? null);
+    onChange(file);
+  }
+
+  return (
+    <div>
+      <Label htmlFor={id} required={required}>
+        {label}
+      </Label>
+      <label
+        htmlFor={id}
+        className="flex cursor-pointer items-center gap-3 rounded-md border border-dashed border-gray-300 bg-gray-50 px-4 py-3 text-sm transition hover:border-brand-orange hover:bg-orange-50"
+      >
+        <svg className="h-5 w-5 shrink-0 text-brand-orange" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+        </svg>
+        <span className={fileName ? "text-gray-800 font-medium" : "text-gray-400"}>
+          {fileName ?? "Click to upload or drag and drop"}
+        </span>
+        <input
+          id={id}
+          type="file"
+          accept={accept}
+          className="sr-only"
+          onChange={handleChange}
+        />
+      </label>
+      {hint && <p className="mt-1 text-xs text-gray-400">{hint}</p>}
+    </div>
+  );
+}
+
 export default function OrderForm() {
   const [submitted, setSubmitted] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
 
+  // File state (not part of Zod schema — sent via FormData)
+  const [proformaFile, setProformaFile] = useState<File | null>(null);
+  const [paySlipFile, setPaySlipFile] = useState<File | null>(null);
+  const [vatCertFile, setVatCertFile] = useState<File | null>(null);
+
   const {
     register,
     handleSubmit,
+    control,
     formState: { errors, isSubmitting },
   } = useForm<OrderFormData>({
     resolver: zodResolver(orderSchema),
     defaultValues: { quantityUnit: "Bags" },
   });
 
+  // Watch quantity and price for live VAT calculation
+  const quantity = useWatch({ control, name: "quantity" });
+  const pricePerUnit = useWatch({ control, name: "pricePerUnit" });
+
+  const totalExVAT =
+    quantity && pricePerUnit && quantity > 0 && pricePerUnit > 0
+      ? quantity * pricePerUnit
+      : null;
+  const totalIncVAT = totalExVAT !== null ? totalExVAT * (1 + VAT_RATE) : null;
+
   const todayStr = new Date().toISOString().split("T")[0];
 
   async function onSubmit(data: OrderFormData) {
     setServerError(null);
     try {
+      const formData = new FormData();
+
+      // Append all scalar fields
+      Object.entries(data).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) {
+          formData.append(key, String(value));
+        }
+      });
+
+      // Append computed totals
+      if (totalExVAT !== null) formData.append("totalExVAT", String(totalExVAT));
+      if (totalIncVAT !== null) formData.append("totalIncVAT", String(totalIncVAT));
+
+      // Append files
+      if (proformaFile) formData.append("proformaFile", proformaFile);
+      if (paySlipFile) formData.append("paySlipFile", paySlipFile);
+      if (vatCertFile) formData.append("vatCertFile", vatCertFile);
+
       const res = await fetch("/api/order", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
+        body: formData,
       });
 
       if (!res.ok) {
@@ -304,6 +395,92 @@ export default function OrderForm() {
               placeholder="Any special delivery instructions or additional information..."
               className={inputClass}
               {...register("notes")}
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* Pricing */}
+      <section>
+        <SectionHeading>Pricing</SectionHeading>
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+          <div>
+            <Label htmlFor="pricePerUnit">
+              Price per Unit (TZS)
+            </Label>
+            <input
+              id="pricePerUnit"
+              type="number"
+              min={0}
+              step={1}
+              placeholder="e.g. 28000"
+              className={errors.pricePerUnit ? errorInputClass : inputClass}
+              {...register("pricePerUnit", { valueAsNumber: true })}
+            />
+            <FieldError message={errors.pricePerUnit?.message} />
+          </div>
+
+          {/* Calculated totals — shown once price + quantity are filled */}
+          {totalExVAT !== null && (
+            <div className="sm:col-span-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-1">
+                  Total Price (excl. VAT)
+                </p>
+                <p className="text-lg font-bold text-brand-blue font-display">
+                  {formatTZS(totalExVAT)}
+                </p>
+              </div>
+              <div className="rounded-lg border border-brand-orange/30 bg-orange-50 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-brand-orange mb-1">
+                  Total Price (incl. 18% VAT)
+                </p>
+                <p className="text-lg font-bold text-brand-blue font-display">
+                  {formatTZS(totalIncVAT!)}
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* Documents */}
+      <section>
+        <SectionHeading>Documents</SectionHeading>
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+          <div>
+            <Label htmlFor="proformaRefNumber">Proforma Invoice Reference No.</Label>
+            <input
+              id="proformaRefNumber"
+              type="text"
+              placeholder="e.g. PI-2024-00123"
+              className={inputClass}
+              {...register("proformaRefNumber")}
+            />
+          </div>
+
+          <div className="sm:col-span-2 grid grid-cols-1 gap-5 sm:grid-cols-3">
+            <FileField
+              id="proformaFile"
+              label="Proforma Invoice"
+              accept=".pdf,.jpg,.jpeg,.png"
+              hint="PDF or image, max 10 MB"
+              onChange={setProformaFile}
+            />
+            <FileField
+              id="paySlipFile"
+              label="Pay Slip"
+              required
+              accept=".pdf,.jpg,.jpeg,.png"
+              hint="Proof of payment, max 10 MB"
+              onChange={setPaySlipFile}
+            />
+            <FileField
+              id="vatCertFile"
+              label="VAT Exemption Certificate"
+              accept=".pdf,.jpg,.jpeg,.png"
+              hint="If applicable — optional"
+              onChange={setVatCertFile}
             />
           </div>
         </div>

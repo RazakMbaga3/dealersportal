@@ -35,6 +35,11 @@ export const orderSchema = z.object({
       return !isNaN(date.getTime()) && date >= today;
     }, "Delivery date must be today or in the future"),
   deliveryAddress: z.string().min(5, "Delivery address is required"),
+  pricePerUnit: z
+    .number({ message: "Enter a valid price" })
+    .positive("Price must be greater than 0")
+    .optional(),
+  proformaRefNumber: z.string().trim().optional(),
   notes: z.string().optional(),
 });
 
