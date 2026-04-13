@@ -6,24 +6,28 @@ import type { SessionPayload } from '@/types'
 const COOKIE_NAME = 'nyati-session'
 const SESSION_DURATION_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 
-function getSecret(): Uint8Array {
+function getSecret(): Uint8Array | null {
   const secret = process.env.SESSION_SECRET
-  if (!secret) throw new Error('SESSION_SECRET env var is not set')
+  if (!secret) return null
   return new TextEncoder().encode(secret)
 }
 
 export async function encrypt(payload: SessionPayload): Promise<string> {
+  const secret = getSecret()
+  if (!secret) throw new Error('SESSION_SECRET environment variable is not set')
   return new SignJWT({ ...payload })
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime(payload.expiresAt)
-    .sign(getSecret())
+    .sign(secret)
 }
 
 export async function decrypt(token: string | undefined): Promise<SessionPayload | null> {
   if (!token) return null
+  const secret = getSecret()
+  if (!secret) return null
   try {
-    const { payload } = await jwtVerify(token, getSecret(), { algorithms: ['HS256'] })
+    const { payload } = await jwtVerify(token, secret, { algorithms: ['HS256'] })
     return payload as unknown as SessionPayload
   } catch {
     return null
