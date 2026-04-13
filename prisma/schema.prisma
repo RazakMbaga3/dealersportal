@@ -1,0 +1,90 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id           String   @id @default(cuid())
+  dealerId     String
+  dealer       Dealer   @relation(fields: [dealerId], references: [id])
+  name         String
+  phone        String?  @unique
+  email        String?  @unique
+  passwordHash String
+  role         String   @default("dealer")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Dealer {
+  id                 String    @id @default(cuid())
+  companyName        String
+  region             String
+  creditLimit        Float
+  outstandingBalance Float     @default(0)
+  users              User[]
+  orders             Order[]
+  addresses          Address[]
+  createdAt          DateTime  @default(now())
+}
+
+model Address {
+  id          String  @id @default(cuid())
+  dealerId    String
+  dealer      Dealer  @relation(fields: [dealerId], references: [id])
+  label       String
+  fullAddress String
+  isDefault   Boolean @default(false)
+}
+
+model Order {
+  id               String   @id @default(cuid())
+  dealerId         String
+  dealer           Dealer   @relation(fields: [dealerId], references: [id])
+  orderNumber      String   @unique
+  status           String   @default("pending")
+  products         String   // JSON: [{cementType, quantityMT, pricePerMT}]
+  deliveryAddress  String
+  deliveryPriority String   @default("standard")
+  retailerName     String?
+  notes            String?
+  totalAmountTZS   Float
+  placedAt         DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  emailSent        Boolean  @default(false)
+}
+
+model Invoice {
+  id            String   @id @default(cuid())
+  dealerId      String
+  invoiceNumber String   @unique
+  billType      String
+  soldTo        String
+  billDate      DateTime
+  grossValueTZS Float
+  status        String   @default("unpaid")
+  lineItems     String   // JSON: [{description, quantity, unitPrice, total}]
+  pdfUrl        String?
+  createdAt     DateTime @default(now())
+}
+
+model Announcement {
+  id        String    @id @default(cuid())
+  title     String
+  body      String
+  isActive  Boolean   @default(true)
+  expiresAt DateTime?
+  createdAt DateTime  @default(now())
+}
+
+model OtpToken {
+  id         String   @id @default(cuid())
+  identifier String   // phone or email
+  code       String
+  expiresAt  DateTime
+  used       Boolean  @default(false)
+  createdAt  DateTime @default(now())
+}
